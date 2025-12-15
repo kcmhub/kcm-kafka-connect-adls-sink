@@ -1,3 +1,9 @@
+![Build](https://github.com/kcmhub/kcm-kafka-connect-adls-sink/actions/workflows/ci.yml/badge.svg)
+![Release](https://img.shields.io/github/v/release/kcmhub/kcm-kafka-connect-adls-sink?color=blue)
+![License](https://img.shields.io/github/license/kcmhub/kcm-kafka-connect-adls-sink)
+![Java](https://img.shields.io/badge/Java-11-blue)
+![Kafka Connect](https://img.shields.io/badge/Kafka%20Connect-3.x-orange)
+
 # kcm-kafka-connect-adls-sink
 
 Kafka Connect **Sink Connector** that writes records from Kafka topics to **Azure Data Lake Storage Gen2 (ADLS Gen2)** using **SAS authentication**.
