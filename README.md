@@ -96,7 +96,7 @@ plugin.path=/opt/kafka/plugins
 These are the main connector configuration properties:
 
 | Name                | Type    | Required | Default        | Description                                                          |
-| ------------------- | ------- | -------- | -------------- | -------------------------------------------------------------------- |
+| ------------------- | ------- | -------- |----------------| -------------------------------------------------------------------- |
 | `connector.class`   | string  | yes      |                | Must be `io.kcmhub.kafka.connect.adls.AdlsSinkConnector`. |
 | `tasks.max`         | int     | yes      |                | Max number of tasks to run.                                          |
 | `topics`            | string  | yes      |                | Comma-separated list of topics to consume from.                      |
@@ -106,7 +106,7 @@ These are the main connector configuration properties:
 | `adls.sas.token`    | string  | yes      |                | SAS token **without** the leading `?`.                               |
 | `flush.max.records` | int     | no       | `500`          | Maximum number of records per ADLS file per topic-partition.         |
 | `compress.gzip`     | boolean | no       | `false`        | If `true`, files are compressed with GZIP (`.log.gz`).               |
-| `adls.retry.max.attempts` | int | no | `4` | Maximum number of attempts for ADLS operations (Azure SDK retry policy). |
+| `adls.retry.max.attempts` | int | no | `3`            | Maximum number of retries for ADLS operations (Azure SDK retry policy). Set to `0` to disable retries. |
 
 ---
 

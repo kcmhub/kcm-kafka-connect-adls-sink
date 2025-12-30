@@ -29,8 +29,8 @@ public class AdlsSinkConnectorConfig extends AbstractConfig {
                     "Maximum number of records per ADLS file")
             .define(COMPRESS_GZIP_CONFIG, ConfigDef.Type.BOOLEAN, false, ConfigDef.Importance.MEDIUM,
                     "Enable GZIP compression for output files")
-            .define(RETRY_MAX_ATTEMPTS_CONFIG, ConfigDef.Type.INT, 4, ConfigDef.Range.atLeast(1), ConfigDef.Importance.LOW,
-                    "Maximum number of retry attempts for ADLS operations (Azure SDK pipeline)");
+            .define(RETRY_MAX_ATTEMPTS_CONFIG, ConfigDef.Type.INT, 3, ConfigDef.Range.atLeast(0), ConfigDef.Importance.LOW,
+                    "Maximum number of retries for ADLS operations (Azure SDK pipeline). 0 disables retries.");
 
     public AdlsSinkConnectorConfig(Map<String, String> originals) {
         super(CONFIG_DEF, originals);
