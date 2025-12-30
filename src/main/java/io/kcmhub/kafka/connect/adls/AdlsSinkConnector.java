@@ -31,7 +31,7 @@ public class AdlsSinkConnector extends SinkConnector {
 
     @Override
     public List<Map<String, String>> taskConfigs(int maxTasks) {
-        // Simple: même config pour toutes les tasks
+        // Simple: same config for all tasks
         List<Map<String, String>> configs = new ArrayList<>();
         for (int i = 0; i < maxTasks; i++) {
             configs.add(new HashMap<>(configProps));
@@ -49,4 +49,3 @@ public class AdlsSinkConnector extends SinkConnector {
         return AdlsSinkConnectorConfig.CONFIG_DEF;
     }
 }
-

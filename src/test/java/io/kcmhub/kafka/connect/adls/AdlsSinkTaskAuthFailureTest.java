@@ -43,8 +43,9 @@ class AdlsSinkTaskAuthFailureTest {
         props.put("adls.account.name", "acc");
         props.put("adls.filesystem", "fs");
         props.put("adls.sas.token", "token");
-        props.put("flush.max.records", "10");
         props.put("adls.retry.max.attempts", "3");
+        // Set low flush max records to trigger flushPartitionBuffer quickly
+        props.put("flush.max.records", "1");
 
         AdlsSinkTask task = new AdlsSinkTask();
         task.start(props);
@@ -54,9 +55,9 @@ class AdlsSinkTaskAuthFailureTest {
 
         assertThrows(ConnectException.class, () -> {
             task.put(List.of(r1));
-            task.stop();
         });
 
+        // check that no appends was attempted
         Mockito.verify(mockClient, Mockito.never()).append(Mockito.any(InputStream.class), Mockito.anyLong(), Mockito.anyLong());
     }
 

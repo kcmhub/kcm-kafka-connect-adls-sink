@@ -43,5 +43,36 @@ class AdlsSinkTaskBufferTest {
         task.stop();
         assertEquals(2, task.flushes.size());
     }
-}
 
+    @Test
+    void shouldFlushWhenFlushIntervalReached() throws Exception {
+        Map<String, String> props = new HashMap<>();
+        props.put("adls.account.name", "acc");
+        props.put("adls.filesystem", "fs");
+        props.put("adls.sas.token", "token");
+        props.put("flush.max.records", "1000");
+        props.put("flush.interval.ms", "1");
+
+        TestableAdlsSinkTask task = new TestableAdlsSinkTask();
+        task.start(props);
+
+        // Prepare a partial buffer (no size-based flush)
+        SinkRecord r1 = new SinkRecord("topicA", 0, null, null, null, "v1", 100L);
+        task.put(List.of(r1));
+        assertEquals(0, task.flushes.size());
+
+        // Wait for the interval to pass
+        Thread.sleep(5);
+
+        // Next put triggers the time-based flush BEFORE appending new records
+        SinkRecord r2 = new SinkRecord("topicA", 0, null, null, null, "v2", 101L);
+        task.put(List.of(r2));
+
+        assertEquals(1, task.flushes.size());
+        assertTrue(task.flushes.get(0).content.contains("v1"));
+
+        // stop() should flush the remaining buffer (v2)
+        task.stop();
+        assertEquals(2, task.flushes.size());
+    }
+}

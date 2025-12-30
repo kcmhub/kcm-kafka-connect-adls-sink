@@ -1,15 +1,13 @@
 package io.kcmhub.kafka.connect.adls;
 
-import com.azure.core.exception.HttpResponseException;
 import com.azure.storage.file.datalake.DataLakeFileClient;
-import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import io.kcmhub.kafka.connect.adls.dto.PartitionBuffer;
+import io.kcmhub.kafka.connect.adls.utils.AuthFailureDetector;
+import io.kcmhub.kafka.connect.adls.utils.SimpleJsonFormatter;
+import io.kcmhub.kafka.connect.adls.utils.TimeBasedFlusher;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
 import org.apache.kafka.connect.errors.RetriableException;
-import org.apache.kafka.connect.data.Field;
-import org.apache.kafka.connect.data.Schema;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.sink.SinkRecord;
 import org.apache.kafka.connect.sink.SinkTask;
 import org.slf4j.Logger;
@@ -34,6 +32,7 @@ public class AdlsSinkTask extends SinkTask {
     private int flushMaxRecords;
     private boolean compressGzip;
     private int retryMaxAttempts;
+    private long flushIntervalMs;
 
     private AdlsClientFactory clientFactory = new DefaultAdlsClientFactory();
 
@@ -46,9 +45,11 @@ public class AdlsSinkTask extends SinkTask {
         return clientFactory.createFileClient(accountName, filesystem, sasToken, filePath, retryMaxAttempts);
     }
 
-    // Buffer par topic-partition
-
+    // Buffers by topic-partition
     private final Map<TopicPartition, PartitionBuffer> buffers = new HashMap<>();
+
+    // Last successful flush time per topic-partition (used for time-based flush)
+    private final Map<TopicPartition, Long> lastFlushMsByTp = new HashMap<>();
 
     @Override
     public String version() {
@@ -71,9 +72,10 @@ public class AdlsSinkTask extends SinkTask {
         this.flushMaxRecords = config.getInt(AdlsSinkConnectorConfig.FLUSH_MAX_RECORDS_CONFIG);
         this.compressGzip = config.getBoolean(AdlsSinkConnectorConfig.COMPRESS_GZIP_CONFIG);
         this.retryMaxAttempts = config.getInt(AdlsSinkConnectorConfig.RETRY_MAX_ATTEMPTS_CONFIG);
+        this.flushIntervalMs = config.getLong(AdlsSinkConnectorConfig.FLUSH_INTERVAL_MS_CONFIG);
 
-        log.info("AdlsSinkTask started. account={}, filesystem={}, basePath={}, flushMaxRecords={}, compressGzip={}, retryMaxAttempts={}",
-                accountName, filesystem, basePath, flushMaxRecords, compressGzip, retryMaxAttempts);
+        log.info("AdlsSinkTask started. account={}, filesystem={}, basePath={}, flushMaxRecords={}, compressGzip={}, retryMaxAttempts={}, flushIntervalMs={}",
+                accountName, filesystem, basePath, flushMaxRecords, compressGzip, retryMaxAttempts, flushIntervalMs);
     }
 
     // ----------------------------------------------------------------------
@@ -81,126 +83,7 @@ public class AdlsSinkTask extends SinkTask {
     // ----------------------------------------------------------------------
 
     String formatRecordValue(SinkRecord record) {
-        Schema schema = record.valueSchema();
-        Object value = record.value();
-
-        if (value == null) {
-            return "null";
-        }
-
-        if (schema == null) {
-            // schemaless : String / Map / List…
-            return value.toString();
-        }
-
-        if (schema.type() == Schema.Type.STRUCT && value instanceof Struct) {
-            Struct struct = (Struct) value;
-            Map<String, Object> map = new LinkedHashMap<>();
-            for (Field field : schema.fields()) {
-                map.put(field.name(), struct.get(field));
-            }
-            return toJson(map);
-        }
-
-        if (schema.type() == Schema.Type.MAP && value instanceof Map<?, ?>) {
-            Map<?, ?> m = (Map<?, ?>) value;
-            return toJson(m);
-        }
-
-        if (schema.type() == Schema.Type.ARRAY && value instanceof List<?>) {
-            List<?> l = (List<?>) value;
-            return toJson(l);
-        }
-
-        // primitives & autres
-        return value.toString();
-    }
-
-    /**
-     * Convertit récursivement un objet (Map, List, String, Number, Boolean ou null) en JSON.
-     * <li> Map → objet JSON (itération préservant l'ordre si possible)
-     * <li> List → tableau JSON
-     * <li> String → échappe les guillemets doubles
-     * <li> Number/Boolean → toString()
-     * <br/>
-     * → Limites : ne gère pas l'échappement complet des caractères de contrôle ni les POJO complexes.
-     *
-     * @param obj objet à convertir (Map/List/String/Number/Boolean/null)
-     * @return représentation JSON simple sous forme de String
-     */
-    private String toJson(Object obj) {
-        if (obj == null) return "null";
-
-        if (obj instanceof Map<?, ?>) {
-            Map<?, ?> m = (Map<?, ?>) obj;
-            StringBuilder sb = new StringBuilder("{");
-            boolean first = true;
-            for (var e : m.entrySet()) {
-                if (!first) sb.append(",");
-                sb.append("\"").append(e.getKey()).append("\":");
-                sb.append(toJson(e.getValue()));
-                first = false;
-            }
-            return sb.append("}").toString();
-        }
-
-        if (obj instanceof List<?>) {
-            List<?> list = (List<?>) obj;
-            StringBuilder sb = new StringBuilder("[");
-            boolean first = true;
-            for (Object o : list) {
-                if (!first) sb.append(",");
-                sb.append(toJson(o));
-                first = false;
-            }
-            return sb.append("]").toString();
-        }
-
-        if (obj instanceof String) {
-            String s = (String) obj;
-            return "\"" + s.replace("\"", "\\\"") + "\"";
-        }
-
-        return obj.toString();
-    }
-
-    private static boolean isAuthFailure(Throwable t) {
-        Throwable cur = t;
-        while (cur != null) {
-            if (cur instanceof DataLakeStorageException) {
-                DataLakeStorageException ex = (DataLakeStorageException) cur;
-                int statusCode = ex.getStatusCode();
-                String errorCode = null;
-                try {
-                    if (ex.getServiceMessage() != null && ex.getErrorCode() != null) {
-                        errorCode = String.valueOf(ex.getErrorCode());
-                    }
-                } catch (Exception ignored) {
-                    // best-effort
-                }
-
-                // 401 Unauthorized ou 403 Forbidden
-                if (statusCode == 401 || statusCode == 403) {
-                    return true;
-                }
-                // fallback of previous check
-                //  specific ADLS error code if status code is not enough
-                if (errorCode != null && errorCode.toLowerCase(Locale.ROOT).contains("authenticationfailed")) {
-                    return true;
-                }
-            }
-
-            if (cur instanceof HttpResponseException) {
-                HttpResponseException ex = (HttpResponseException) cur;
-                int statusCode = ex.getResponse() != null ? ex.getResponse().getStatusCode() : -1;
-                if (statusCode == 401 || statusCode == 403) {
-                    return true;
-                }
-            }
-
-            cur = cur.getCause();
-        }
-        return false;
+        return SimpleJsonFormatter.formatRecordValue(record);
     }
 
     protected void flushPartitionBuffer(PartitionBuffer buf) {
@@ -210,7 +93,7 @@ public class AdlsSinkTask extends SinkTask {
 
         String extension = compressGzip ? ".log.gz" : ".log";
 
-        // nom de fichier basé sur topic / partition / start-offset
+        // File name based on topic / partition / start-offset
         String fileName = String.format(
                 "%s-p%d-o%d%s",
                 buf.getTopic(),
@@ -239,20 +122,46 @@ public class AdlsSinkTask extends SinkTask {
             client.flush(bytes.length, true);
 
             buf.clear();
+
+            // Update last flush after a successful write
+            TopicPartition tp = new TopicPartition(buf.getTopic(), buf.getPartition());
+            lastFlushMsByTp.put(tp, System.currentTimeMillis());
         } catch (Exception e) {
-            if (isAuthFailure(e)) {
+            if (AuthFailureDetector.isAuthFailure(e)) {
                 throw new ConnectException("ADLS authentication/authorization failure while writing " + filePath + ". " +
                         "Check SAS token permissions/expiry.", e);
             }
 
-            // Pour tous les autres cas, on laisse Kafka Connect retenter.
+            // For all other cases, let Kafka Connect retry.
             throw new RetriableException("ADLS transient error while writing " + filePath, e);
         }
     }
 
     private PartitionBuffer getBuffer(String topic, int partition) {
         TopicPartition tp = new TopicPartition(topic, partition);
-        return buffers.computeIfAbsent(tp, k -> new PartitionBuffer(topic, partition));
+        return buffers.computeIfAbsent(tp, k -> {
+            lastFlushMsByTp.putIfAbsent(tp, System.currentTimeMillis());
+            return new PartitionBuffer(topic, partition);
+        });
+    }
+
+    private void flushExpiredBuffersIfNeeded(long nowMs) {
+        if (flushIntervalMs <= 0) return;
+
+        for (Map.Entry<TopicPartition, PartitionBuffer> e : buffers.entrySet()) {
+            TopicPartition tp = e.getKey();
+            PartitionBuffer buf = e.getValue();
+
+            if (buf.isEmpty()) continue;
+
+            if (TimeBasedFlusher.shouldFlush(flushIntervalMs, nowMs, tp, lastFlushMsByTp)) {
+                long lastFlush = lastFlushMsByTp.getOrDefault(tp, nowMs);
+                long ageMs = nowMs - lastFlush;
+                log.info("Flushing buffer for {} because flush.interval.ms={} (ageMs={})",
+                        tp, flushIntervalMs, ageMs);
+                flushPartitionBuffer(buf);
+            }
+        }
     }
 
     // ----------------------------------------------------------------------
@@ -261,6 +170,10 @@ public class AdlsSinkTask extends SinkTask {
 
     @Override
     public void put(Collection<SinkRecord> records) {
+
+        long nowMs = System.currentTimeMillis();
+        flushExpiredBuffersIfNeeded(nowMs);
+
         if (records.isEmpty()) return;
 
         for (SinkRecord record : records) {
@@ -285,5 +198,6 @@ public class AdlsSinkTask extends SinkTask {
             flushPartitionBuffer(buf);
         }
         buffers.clear();
+        lastFlushMsByTp.clear();
     }
 }
