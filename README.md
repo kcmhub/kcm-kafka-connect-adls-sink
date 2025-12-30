@@ -107,6 +107,7 @@ These are the main connector configuration properties:
 | `flush.max.records` | int     | no       | `500`          | Maximum number of records per ADLS file per topic-partition.         |
 | `compress.gzip`     | boolean | no       | `false`        | If `true`, files are compressed with GZIP (`.log.gz`).               |
 | `adls.retry.max.attempts` | int | no | `3`            | Maximum number of retries for ADLS operations (Azure SDK retry policy). Set to `0` to disable retries. |
+| `flush.interval.ms` | long | no | `0` | If > 0, flush buffers at least every N milliseconds even if `flush.max.records` is not reached. |
 
 ---
 

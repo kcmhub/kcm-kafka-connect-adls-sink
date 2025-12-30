@@ -15,6 +15,7 @@ public class AdlsSinkConnectorConfig extends AbstractConfig {
     public static final String COMPRESS_GZIP_CONFIG = "compress.gzip";
 
     public static final String RETRY_MAX_ATTEMPTS_CONFIG = "adls.retry.max.attempts";
+    public static final String FLUSH_INTERVAL_MS_CONFIG = "flush.interval.ms";
 
     public static final ConfigDef CONFIG_DEF = new ConfigDef()
             .define(ACCOUNT_NAME_CONFIG, ConfigDef.Type.STRING, ConfigDef.Importance.HIGH,
@@ -30,7 +31,9 @@ public class AdlsSinkConnectorConfig extends AbstractConfig {
             .define(COMPRESS_GZIP_CONFIG, ConfigDef.Type.BOOLEAN, false, ConfigDef.Importance.MEDIUM,
                     "Enable GZIP compression for output files")
             .define(RETRY_MAX_ATTEMPTS_CONFIG, ConfigDef.Type.INT, 3, ConfigDef.Range.atLeast(0), ConfigDef.Importance.LOW,
-                    "Maximum number of retries for ADLS operations (Azure SDK pipeline). 0 disables retries.");
+                    "Maximum number of retries for ADLS operations (Azure SDK pipeline). 0 disables retries.")
+            .define(FLUSH_INTERVAL_MS_CONFIG, ConfigDef.Type.LONG, 0L, ConfigDef.Range.atLeast(0L), ConfigDef.Importance.LOW,
+                    "If > 0, flush buffers at least every N milliseconds even if flush.max.records is not reached.");
 
     public AdlsSinkConnectorConfig(Map<String, String> originals) {
         super(CONFIG_DEF, originals);
