@@ -8,6 +8,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
+import static io.kcmhub.kafka.connect.adls.utils.SimpleJsonFormatter.formatRecordValue;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class AdlsSinkTaskFormatterTest {
@@ -36,7 +37,7 @@ class AdlsSinkTaskFormatterTest {
                 "adls.sas.token", "token"
         ));
 
-        String formatted = task.formatRecordValue(record); // soit méthode package-private, soit via reflection
+        String formatted = formatRecordValue(record); // soit méthode package-private, soit via reflection
 
         // format attendu : {"name":"Alice","age":30}
         assertTrue(formatted.contains("\"name\""));
