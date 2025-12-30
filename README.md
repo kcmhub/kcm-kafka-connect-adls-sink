@@ -106,6 +106,15 @@ These are the main connector configuration properties:
 | `adls.sas.token`    | string  | yes      |                | SAS token **without** the leading `?`.                               |
 | `flush.max.records` | int     | no       | `500`          | Maximum number of records per ADLS file per topic-partition.         |
 | `compress.gzip`     | boolean | no       | `false`        | If `true`, files are compressed with GZIP (`.log.gz`).               |
+| `adls.retry.max.attempts` | int | no | `4` | Maximum number of attempts for ADLS operations (Azure SDK retry policy). |
+
+---
+
+## Auth failures
+
+If ADLS returns an **authentication/authorization error** (typically HTTP **401/403**, e.g. expired/invalid SAS token), the task throws a **non-retriable** error and Kafka Connect will mark the task as **FAILED**.
+
+For transient network/server errors, the task throws a **RetriableException** so Kafka Connect can retry.
 
 ---
 
