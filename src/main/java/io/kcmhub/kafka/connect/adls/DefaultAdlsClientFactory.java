@@ -5,8 +5,6 @@ import com.azure.storage.common.policy.RetryPolicyType;
 import com.azure.storage.file.datalake.DataLakeFileClient;
 import com.azure.storage.file.datalake.DataLakePathClientBuilder;
 
-import java.time.Duration;
-
 public class DefaultAdlsClientFactory implements AdlsClientFactory {
 
     @Override
@@ -17,17 +15,20 @@ public class DefaultAdlsClientFactory implements AdlsClientFactory {
                                                int maxRetryAttempts) {
         String endpoint = String.format("https://%s.dfs.core.windows.net", accountName);
 
-        int attempts = maxRetryAttempts <= 0 ? 1 : maxRetryAttempts;
+        // Config contract:
+        // - maxRetryAttempts = number of retries (additional attempts)
+        // - Azure SDK RequestRetryOptions uses maxTries = total number of tries and must be >= 1
+        // Therefore: maxTries = maxRetryAttempts + 1
+        int maxTries = Math.max(1, maxRetryAttempts + 1);
 
-        // Azure SDK: maxRetries = 0 => 1 tentative; maxRetries = 3 => 4 tentatives au total.
-        int maxRetries = Math.max(0, attempts - 1);
-
+        // Azure SDK defaults: exponential backoff with 4s base delay and 120s max delay.
+        // We keep explicit values close to our previous settings (base 4s, max 60s).
         RequestRetryOptions retryOptions = new RequestRetryOptions(
                 RetryPolicyType.EXPONENTIAL,
-                maxRetries,
+                maxTries,
                 null,
-                Duration.ofSeconds(4),
-                Duration.ofSeconds(60),
+                4000L,
+                60000L,
                 null
         );
 

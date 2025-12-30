@@ -10,7 +10,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 ## [0.0.2] – 2025-12-30
 
 ### Added
-- Configurable ADLS retry policy via `adls.retry.max.attempts`
+- Configurable ADLS retry policy via `adls.retry.max.attempts` (set to `0` to disable retries)
 - Azure SDK native retry support using exponential backoff
 - Explicit detection of ADLS authentication failures (HTTP 401 / 403)
 

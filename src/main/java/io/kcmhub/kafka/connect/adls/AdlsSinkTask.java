@@ -179,9 +179,12 @@ public class AdlsSinkTask extends SinkTask {
                     // best-effort
                 }
 
+                // 401 Unauthorized ou 403 Forbidden
                 if (statusCode == 401 || statusCode == 403) {
                     return true;
                 }
+                // fallback of previous check
+                //  specific ADLS error code if status code is not enough
                 if (errorCode != null && errorCode.toLowerCase(Locale.ROOT).contains("authenticationfailed")) {
                     return true;
                 }
