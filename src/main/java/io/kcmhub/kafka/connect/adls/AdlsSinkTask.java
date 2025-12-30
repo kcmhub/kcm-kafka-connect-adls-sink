@@ -3,7 +3,6 @@ package io.kcmhub.kafka.connect.adls;
 import com.azure.storage.file.datalake.DataLakeFileClient;
 import io.kcmhub.kafka.connect.adls.dto.PartitionBuffer;
 import io.kcmhub.kafka.connect.adls.utils.AuthFailureDetector;
-import io.kcmhub.kafka.connect.adls.utils.SimpleJsonFormatter;
 import io.kcmhub.kafka.connect.adls.utils.TimeBasedFlusher;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.connect.errors.ConnectException;
@@ -17,9 +16,12 @@ import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
-import java.util.*;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
 
 import static io.kcmhub.kafka.connect.adls.utils.CompressionUtils.gzip;
+import static io.kcmhub.kafka.connect.adls.utils.SimpleJsonFormatter.formatRecordValue;
 
 public class AdlsSinkTask extends SinkTask {
 
@@ -76,14 +78,6 @@ public class AdlsSinkTask extends SinkTask {
 
         log.info("AdlsSinkTask started. account={}, filesystem={}, basePath={}, flushMaxRecords={}, compressGzip={}, retryMaxAttempts={}, flushIntervalMs={}",
                 accountName, filesystem, basePath, flushMaxRecords, compressGzip, retryMaxAttempts, flushIntervalMs);
-    }
-
-    // ----------------------------------------------------------------------
-    //   FORMATTER AVRO / STRUCT / MAP / PRIMITIVES
-    // ----------------------------------------------------------------------
-
-    String formatRecordValue(SinkRecord record) {
-        return SimpleJsonFormatter.formatRecordValue(record);
     }
 
     protected void flushPartitionBuffer(PartitionBuffer buf) {

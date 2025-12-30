@@ -13,6 +13,7 @@ and this project follows [Semantic Versioning](https://semver.org/).
 - Time-based flushing via `flush.interval.ms` (prevents low-traffic partitions from keeping buffers in memory indefinitely).
 - Configurable Azure SDK retry policy via `adls.retry.max.attempts`.
 - Explicit detection of ADLS authentication/authorization failures (HTTP 401/403) with fail-fast behavior.
+- Better error classification for Azure responses: non-auth HTTP 4xx (e.g. 409 `EndpointUnsupportedAccountFeatures`) are treated as **non-retriable** and fail the task fast.
 
 ### Changed
 - `adls.retry.max.attempts` now represents the **number of retries** (additional attempts). Set to `0` to disable retries.
