@@ -16,13 +16,12 @@ public class AdlsSinkConnector extends SinkConnector {
 
     @Override
     public String version() {
-        return "0.0.1";
+        return "0.0.2";
     }
 
     @Override
     public void start(Map<String, String> props) {
         this.configProps = props;
-        // Ici tu peux valider la config si besoin
     }
 
     @Override
@@ -42,7 +41,7 @@ public class AdlsSinkConnector extends SinkConnector {
 
     @Override
     public void stop() {
-        // Rien de spécial
+        // Nothing to do
     }
 
     @Override

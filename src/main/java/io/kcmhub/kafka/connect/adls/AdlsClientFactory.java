@@ -7,5 +7,6 @@ public interface AdlsClientFactory {
     DataLakeFileClient createFileClient(String accountName,
                                         String filesystem,
                                         String sasToken,
-                                        String path);
+                                        String path,
+                                        int maxRetryAttempts);
 }

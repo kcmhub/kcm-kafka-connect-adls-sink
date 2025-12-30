@@ -1,8 +1,12 @@
 package io.kcmhub.kafka.connect.adls;
 
+import com.azure.core.exception.HttpResponseException;
 import com.azure.storage.file.datalake.DataLakeFileClient;
+import com.azure.storage.file.datalake.models.DataLakeStorageException;
 import io.kcmhub.kafka.connect.adls.dto.PartitionBuffer;
 import org.apache.kafka.common.TopicPartition;
+import org.apache.kafka.connect.errors.ConnectException;
+import org.apache.kafka.connect.errors.RetriableException;
 import org.apache.kafka.connect.data.Field;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
@@ -12,13 +16,12 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
-import java.util.zip.GZIPOutputStream;
+
+import static io.kcmhub.kafka.connect.adls.utils.CompressionUtils.gzip;
 
 public class AdlsSinkTask extends SinkTask {
 
@@ -30,6 +33,8 @@ public class AdlsSinkTask extends SinkTask {
     private String sasToken;
     private int flushMaxRecords;
     private boolean compressGzip;
+    private int retryMaxAttempts;
+
     private AdlsClientFactory clientFactory = new DefaultAdlsClientFactory();
 
     // For test purposes
@@ -38,7 +43,7 @@ public class AdlsSinkTask extends SinkTask {
     }
 
     private DataLakeFileClient buildFileClient(String filePath) {
-        return clientFactory.createFileClient(accountName, filesystem, sasToken, filePath);
+        return clientFactory.createFileClient(accountName, filesystem, sasToken, filePath, retryMaxAttempts);
     }
 
     // Buffer par topic-partition
@@ -47,7 +52,7 @@ public class AdlsSinkTask extends SinkTask {
 
     @Override
     public String version() {
-        return "0.0.1";
+        return "0.0.2";
     }
 
     @Override
@@ -65,9 +70,10 @@ public class AdlsSinkTask extends SinkTask {
 
         this.flushMaxRecords = config.getInt(AdlsSinkConnectorConfig.FLUSH_MAX_RECORDS_CONFIG);
         this.compressGzip = config.getBoolean(AdlsSinkConnectorConfig.COMPRESS_GZIP_CONFIG);
+        this.retryMaxAttempts = config.getInt(AdlsSinkConnectorConfig.RETRY_MAX_ATTEMPTS_CONFIG);
 
-        log.info("AdlsSinkTask started. account={}, filesystem={}, basePath={}, flushMaxRecords={}, compressGzip={}",
-                accountName, filesystem, basePath, flushMaxRecords, compressGzip);
+        log.info("AdlsSinkTask started. account={}, filesystem={}, basePath={}, flushMaxRecords={}, compressGzip={}, retryMaxAttempts={}",
+                accountName, filesystem, basePath, flushMaxRecords, compressGzip, retryMaxAttempts);
     }
 
     // ----------------------------------------------------------------------
@@ -110,6 +116,18 @@ public class AdlsSinkTask extends SinkTask {
         return value.toString();
     }
 
+    /**
+     * Convertit récursivement un objet (Map, List, String, Number, Boolean ou null) en JSON.
+     * <li> Map → objet JSON (itération préservant l'ordre si possible)
+     * <li> List → tableau JSON
+     * <li> String → échappe les guillemets doubles
+     * <li> Number/Boolean → toString()
+     * <br/>
+     * → Limites : ne gère pas l'échappement complet des caractères de contrôle ni les POJO complexes.
+     *
+     * @param obj objet à convertir (Map/List/String/Number/Boolean/null)
+     * @return représentation JSON simple sous forme de String
+     */
     private String toJson(Object obj) {
         if (obj == null) return "null";
 
@@ -146,20 +164,40 @@ public class AdlsSinkTask extends SinkTask {
         return obj.toString();
     }
 
-    // ----------------------------------------------------------------------
-    //   ADLS UTIL
-    // ----------------------------------------------------------------------
+    private static boolean isAuthFailure(Throwable t) {
+        Throwable cur = t;
+        while (cur != null) {
+            if (cur instanceof DataLakeStorageException) {
+                DataLakeStorageException ex = (DataLakeStorageException) cur;
+                int statusCode = ex.getStatusCode();
+                String errorCode = null;
+                try {
+                    if (ex.getServiceMessage() != null && ex.getErrorCode() != null) {
+                        errorCode = String.valueOf(ex.getErrorCode());
+                    }
+                } catch (Exception ignored) {
+                    // best-effort
+                }
 
-    private byte[] gzip(byte[] data) {
-        try {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (GZIPOutputStream gos = new GZIPOutputStream(baos)) {
-                gos.write(data);
+                if (statusCode == 401 || statusCode == 403) {
+                    return true;
+                }
+                if (errorCode != null && errorCode.toLowerCase(Locale.ROOT).contains("authenticationfailed")) {
+                    return true;
+                }
             }
-            return baos.toByteArray();
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to gzip content", e);
+
+            if (cur instanceof HttpResponseException) {
+                HttpResponseException ex = (HttpResponseException) cur;
+                int statusCode = ex.getResponse() != null ? ex.getResponse().getStatusCode() : -1;
+                if (statusCode == 401 || statusCode == 403) {
+                    return true;
+                }
+            }
+
+            cur = cur.getCause();
         }
+        return false;
     }
 
     protected void flushPartitionBuffer(PartitionBuffer buf) {
@@ -189,14 +227,24 @@ public class AdlsSinkTask extends SinkTask {
         log.info("Writing {} records ({} bytes) to ADLS file {}",
                 buf.getRecordCount(), bytes.length, filePath);
 
-        DataLakeFileClient client = buildFileClient(filePath);
-        client.create(true);
+        try {
+            DataLakeFileClient client = buildFileClient(filePath);
+            client.create(true);
 
-        ByteArrayInputStream input = new ByteArrayInputStream(bytes);
-        client.append(input, 0, bytes.length);
-        client.flush(bytes.length, true);
+            ByteArrayInputStream input = new ByteArrayInputStream(bytes);
+            client.append(input, 0, bytes.length);
+            client.flush(bytes.length, true);
 
-        buf.clear();
+            buf.clear();
+        } catch (Exception e) {
+            if (isAuthFailure(e)) {
+                throw new ConnectException("ADLS authentication/authorization failure while writing " + filePath + ". " +
+                        "Check SAS token permissions/expiry.", e);
+            }
+
+            // Pour tous les autres cas, on laisse Kafka Connect retenter.
+            throw new RetriableException("ADLS transient error while writing " + filePath, e);
+        }
     }
 
     private PartitionBuffer getBuffer(String topic, int partition) {
@@ -236,4 +284,3 @@ public class AdlsSinkTask extends SinkTask {
         buffers.clear();
     }
 }
-
