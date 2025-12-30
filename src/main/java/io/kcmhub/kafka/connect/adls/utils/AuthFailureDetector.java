@@ -49,4 +49,3 @@ public final class AuthFailureDetector {
         return false;
     }
 }
-

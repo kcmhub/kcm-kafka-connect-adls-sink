@@ -132,8 +132,32 @@ public class AdlsSinkTask extends SinkTask {
                         "Check SAS token permissions/expiry.", e);
             }
 
+            // Non-auth 4xx errors are usually configuration/account issues and are not retriable.
+            // Example: 409 EndpointUnsupportedAccountFeatures.
+            if (e instanceof com.azure.storage.file.datalake.models.DataLakeStorageException) {
+                com.azure.storage.file.datalake.models.DataLakeStorageException ex =
+                        (com.azure.storage.file.datalake.models.DataLakeStorageException) e;
+                int status = ex.getStatusCode();
+                if (status >= 400 && status < 500) {
+                    throw new ConnectException("ADLS non-retriable client error (HTTP " + status + ") while writing " +
+                            filePath + ": " + ex.getMessage(), e);
+                }
+            }
+
+            Exception root = e;
+            while (root.getCause() instanceof Exception && root.getCause() != root) {
+                root = (Exception) root.getCause();
+            }
+            log.warn("ADLS write failed for {}. exceptionClass={}, message={}, rootClass={}, rootMessage={}",
+                    filePath,
+                    e.getClass().getName(),
+                    e.getMessage(),
+                    root.getClass().getName(),
+                    root.getMessage());
+
             // For all other cases, let Kafka Connect retry.
-            throw new RetriableException("ADLS transient error while writing " + filePath, e);
+            throw new RetriableException("ADLS transient error while writing " + filePath +
+                    " (" + e.getClass().getSimpleName() + ": " + e.getMessage() + ")", e);
         }
     }
 
